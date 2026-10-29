@@ -13,6 +13,7 @@
   --text: #1a1c1e; --muted: #5d6670; --primary: #1f5fa8; --on-primary: #fff;
   --full: #c62828; --crowded: #e08a00; --available: #1e88a8; --suspended: #8a9099;
   --track: #e6ebf1;
+  --arr: #2e7d32; --dep: #5e35b1; --ado: #0072bc; --jal: #c8102e;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -20,6 +21,7 @@
     --text: #e3e6ea; --muted: #9aa3ad; --primary: #8ab8f0; --on-primary: #0b2a4d;
     --full: #ef6b6b; --crowded: #f2a93b; --available: #5cc3de; --suspended: #8a9099;
     --track: #2a3038;
+    --arr: #66bb6a; --dep: #9575cd; --ado: #5fb3f0; --jal: #ff6b7f;
   }
 }
 * { box-sizing: border-box; }
@@ -71,6 +73,13 @@ input[type=date], select {
 .bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 7px; }
 .bar .c { background: var(--crowded); } .bar .f { background: var(--full); }
 .row.nodata .v { color: var(--muted); font-weight: 400; }
+.fl { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 2px 0 4px; }
+.flt { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 1.4;
+  padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--text); }
+.flt b { font-weight: 700; font-size: 12px; padding: 0 6px; border-radius: 4px; color: #fff; }
+.flt.A b { background: var(--arr); } .flt.D b { background: var(--dep); }
+.flt .al { font-weight: 700; }
+.flt .al.ADO { color: var(--ado); } .flt .al.JAL { color: var(--jal); }
 .note { color: var(--muted); font-size: 14px; margin-top: 12px; }
 .err { color: var(--full); }
 footer { color: var(--muted); font-size: 13px; margin-top: 32px; }
@@ -102,12 +111,14 @@ footer a { color: var(--primary); }
   <section class="card" style="margin-top:12px">
     <p class="summary" id="summary"></p>
     <div class="legend"><span><i style="background:var(--full)"></i>満車</span><span><i style="background:var(--crowded)"></i>混雑</span><span>右の数字＝満車の確率</span></div>
+    <div class="legend"><span><i style="background:var(--arr)"></i>到着便</span><span><i style="background:var(--dep)"></i>出発便</span><span>その時間帯の行に表示</span></div>
     <div class="rows" id="rows"></div>
     <p class="note" id="note"></p>
   </section>
 
   <footer>
-    データ元: <a href="https://www.hokkaido-airports.com/ja/obihiro/access/parking/" target="_blank" rel="noopener">とかち帯広空港 公式サイト 駐車場</a>。
+    データ元: <a href="https://www.hokkaido-airports.com/ja/obihiro/access/parking/" target="_blank" rel="noopener">とかち帯広空港 公式サイト 駐車場</a>・時刻表（国内線・定刻）。
+    便の時刻は定刻で、遅れや欠航は反映されません。
     この予測は非公式で、到着時の空きを保証するものではありません。
   </footer>
 </main>
@@ -120,7 +131,10 @@ const STATUS_JA = { full: "満車", crowded: "混雑中", available: "空車", s
 const DAYTYPE_JA = { weekday: "平日", holiday: "土日祝", busy: "空港の混雑予想日" };
 const MIN_DAYS = 3; // これより少ない枠は「参考値」
 
-const state = { offset: 0, date: null, lot: MAIN_LOT, stats: {}, calendar: {} };
+const AIRLINE_JA = { ADO: "AIRDO", JAL: "JAL", ANA: "ANA", SKY: "スカイマーク", APJ: "ピーチ", FDA: "FDA" };
+const AIRPORT_JA = { HND: "羽田", NRT: "成田", CTS: "新千歳", ITM: "伊丹", KIX: "関西", NGO: "中部", FUK: "福岡", OBO: "帯広" };
+
+const state = { offset: 0, date: null, lot: MAIN_LOT, stats: {}, calendar: {}, flights: {} };
 
 async function api(path) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -190,7 +204,29 @@ async function loadStats(lot) {
   return (state.stats[lot] = by);
 }
 
-function render(by) {
+async function loadFlights(iso) {
+  if (state.flights[iso]) return state.flights[iso];
+  const rows = await api(`obp_flights?select=*&day=eq.${iso}`);
+  // 30分枠ごとに束ねる（到着は着く時刻、出発は出る時刻）
+  const bySlot = {};
+  for (const f of rows) {
+    const t = f.da === "A" ? f.arr_time : f.dep_time;
+    const [h, m] = t.split(":").map(Number);
+    (bySlot[h * 2 + (m >= 30 ? 1 : 0)] ||= []).push({ ...f, t });
+  }
+  for (const list of Object.values(bySlot)) list.sort((a, b) => a.t.localeCompare(b.t));
+  return (state.flights[iso] = bySlot);
+}
+
+function flightChip(f) {
+  const al = AIRLINE_JA[f.airline] || f.airline;
+  const no = f.flight.replace(/^[A-Z]+/, "");
+  const place = f.da === "A" ? `${AIRPORT_JA[f.dep_airport] || f.dep_airport}から` : `${AIRPORT_JA[f.arr_airport] || f.arr_airport}行き`;
+  const share = f.codeshare ? `（${f.codeshare}と共同運航）` : "";
+  return `<span class="flt ${f.da}" title="${f.flight}${share}"><b>${f.da === "A" ? "到着" : "出発"}</b>${f.t} <span class="al ${f.airline}">${al}</span>${no} ${place}</span>`;
+}
+
+function render(by, flights = {}) {
   const iso = state.date;
   const type = dayType(iso);
   const table = by[type];
@@ -206,13 +242,14 @@ function render(by) {
   let firstFull = null, lastFull = null;
   for (let s = 0; s < 48; s++) {
     const r = src[s];
-    if (!r) { out.push(`<div class="row nodata ${s === here ? "now" : ""}"><span class="t">${slotLabel(s)}</span><div class="bar"></div><span class="v">-</span></div>`); continue; }
+    const fl = flights[s] ? `<div class="fl">${flights[s].map(flightChip).join("")}</div>` : "";
+    if (!r) { out.push(`<div class="row nodata ${s === here ? "now" : ""}"><span class="t">${slotLabel(s)}</span><div class="bar"></div><span class="v">-</span>${fl}</div>`); continue; }
     const pf = +r.p_full, pc = +r.p_crowded_or_full;
     if (pf >= 0.5) { if (firstFull === null) firstFull = s; lastFull = s; }
     out.push(`<div class="row ${s === here ? "now" : ""}" title="${r.days}日分・${r.samples}件">
       <span class="t">${slotLabel(s)}</span>
       <div class="bar"><span class="c" style="width:${pc * 100}%"></span><span class="f" style="width:${pf * 100}%"></span></div>
-      <span class="v">${Math.round(pf * 100)}%</span></div>`);
+      <span class="v">${Math.round(pf * 100)}%</span>${fl}</div>`);
   }
   document.getElementById("rows").innerHTML = out.join("");
 
@@ -227,7 +264,13 @@ function render(by) {
 }
 
 async function refresh() {
-  try { render(await loadStats(state.lot)); }
+  try {
+    const [stats, flights] = await Promise.all([
+      loadStats(state.lot),
+      loadFlights(state.date).catch(() => ({})), // 便が読めなくても予測は出す
+    ]);
+    render(stats, flights);
+  }
   catch (e) { document.getElementById("summary").innerHTML = `<span class="err">読み込めませんでした: ${e.message}</span>`; }
 }
 
@@ -253,7 +296,7 @@ document.getElementById("lot").addEventListener("change", e => { state.lot = e.t
   catch (e) { document.getElementById("now").innerHTML = `<span class="err">読み込めませんでした: ${e.message}</span>`; }
   refresh();
   // 開きっぱなしでも、スマホで画面に戻ってきたときも、最新の記録に入れ替える
-  const reload = () => { state.stats = {}; loadNow().catch(() => {}); refresh(); };
+  const reload = () => { state.stats = {}; state.flights = {}; loadNow().catch(() => {}); refresh(); };
   setInterval(reload, 5 * 60e3);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) reload(); });
 })();

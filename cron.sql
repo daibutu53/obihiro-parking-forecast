@@ -1,5 +1,6 @@
 -- Supabase 自身が5分ごとに空港の満空情報を取りにいく（pg_cron + pg_net）
 -- schema.sql のあとに SQL Editor で1回実行する。再実行しても壊れない。
+-- ※ obp_process / obp_tick は flights.sql で上書きしている。こちらを後から再実行すると時刻表の取り込みが消えるので、そのときは flights.sql も続けて実行する
 --
 -- 流れ: 5分ごとに obp_tick() が動く
 --   1. 前回送ったリクエストの応答（net._http_response）を読んで記録する
