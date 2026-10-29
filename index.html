@@ -252,7 +252,10 @@ document.getElementById("lot").addEventListener("change", e => { state.lot = e.t
   try { await Promise.all([loadNow(), loadCalendar()]); }
   catch (e) { document.getElementById("now").innerHTML = `<span class="err">読み込めませんでした: ${e.message}</span>`; }
   refresh();
-  setInterval(() => loadNow().catch(() => {}), 5 * 60e3);
+  // 開きっぱなしでも、スマホで画面に戻ってきたときも、最新の記録に入れ替える
+  const reload = () => { state.stats = {}; loadNow().catch(() => {}); refresh(); };
+  setInterval(reload, 5 * 60e3);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) reload(); });
 })();
 </script>
 </body>
