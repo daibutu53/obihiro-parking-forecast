@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>帯広空港 駐車場予測</title>
+<meta name="description" content="とかち帯広空港の駐車場（特に無料のC駐車場）の混雑を、過去の記録から30分ごとに予測します。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f7f9fc; --surface: #ffffff; --surface-2: #eef2f7; --line: #dde3ea;
+  --text: #1a1c1e; --muted: #5d6670; --primary: #1f5fa8; --on-primary: #fff;
+  --full: #c62828; --crowded: #e08a00; --available: #1e88a8; --suspended: #8a9099;
+  --track: #e6ebf1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --surface: #1a1e23; --surface-2: #232830; --line: #2f3640;
+    --text: #e3e6ea; --muted: #9aa3ad; --primary: #8ab8f0; --on-primary: #0b2a4d;
+    --full: #ef6b6b; --crowded: #f2a93b; --available: #5cc3de; --suspended: #8a9099;
+    --track: #2a3038;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 "Noto Sans JP", system-ui, sans-serif;
+}
+main { max-width: 640px; margin: 0 auto; padding: 16px 16px 48px; }
+h1 { font-size: 22px; line-height: 1.4; margin: 8px 0 4px; }
+.sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+h2 { font-size: 18px; margin: 28px 0 10px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+.now-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.lot { background: var(--surface-2); border-radius: 12px; padding: 12px; }
+.lot.main { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lot .name { font-weight: 500; }
+.lot .cap { color: var(--muted); font-size: 14px; }
+.badge { display: inline-block; font-weight: 700; border-radius: 999px; padding: 2px 12px; color: #fff; }
+.lot.main .badge { font-size: 20px; padding: 6px 18px; }
+.s-full { background: var(--full); } .s-crowded { background: var(--crowded); }
+.s-available { background: var(--available); } .s-suspended { background: var(--suspended); }
+.updated { color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.seg button {
+  min-height: 44px; min-width: 64px; padding: 0 16px; border: 0; background: var(--surface);
+  color: var(--text); font: inherit; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 700; }
+input[type=date], select {
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.daytype { margin: 12px 0 0; color: var(--muted); }
+.daytype strong { color: var(--text); }
+
+.summary { font-size: 17px; margin: 0 0 12px; }
+.summary strong { color: var(--full); }
+.legend { display: flex; gap: 16px; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.rows { display: grid; gap: 2px; }
+.row { display: grid; grid-template-columns: 52px 1fr 48px; gap: 10px; align-items: center; padding: 3px 6px; border-radius: 8px; }
+.row.now { background: var(--surface-2); outline: 2px solid var(--primary); }
+.row .t { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+.row .v { text-align: right; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 500; }
+.bar { position: relative; height: 14px; background: var(--track); border-radius: 7px; overflow: hidden; }
+.bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 7px; }
+.bar .c { background: var(--crowded); } .bar .f { background: var(--full); }
+.row.nodata .v { color: var(--muted); font-weight: 400; }
+.note { color: var(--muted); font-size: 14px; margin-top: 12px; }
+.err { color: var(--full); }
+footer { color: var(--muted); font-size: 13px; margin-top: 32px; }
+footer a { color: var(--primary); }
+</style>
+</head>
+<body>
+<main>
+  <h1>とかち帯広空港<br>駐車場の混雑予測</h1>
+  <p class="sub">公式サイトの満空情報を30分ごとに記録し、過去の傾向から予測しています。</p>
+
+  <section class="card" aria-labelledby="now-h">
+    <h2 id="now-h" style="margin-top:0">いまの状態</h2>
+    <div class="now-grid" id="now">読み込み中…</div>
+    <div class="updated" id="updated"></div>
+  </section>
+
+  <h2>予測</h2>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="日付">
+      <button type="button" data-day="0" aria-pressed="true">今日</button>
+      <button type="button" data-day="1" aria-pressed="false">明日</button>
+    </div>
+    <input type="date" id="date" aria-label="日付を選ぶ">
+    <select id="lot" aria-label="駐車場"></select>
+  </div>
+  <p class="daytype" id="daytype"></p>
+
+  <section class="card" style="margin-top:12px">
+    <p class="summary" id="summary"></p>
+    <div class="legend"><span><i style="background:var(--full)"></i>満車</span><span><i style="background:var(--crowded)"></i>混雑</span><span>右の数字＝満車の確率</span></div>
+    <div class="rows" id="rows"></div>
+    <p class="note" id="note"></p>
+  </section>
+
+  <footer>
+    データ元: <a href="https://www.hokkaido-airports.com/ja/obihiro/access/parking/" target="_blank" rel="noopener">とかち帯広空港 公式サイト 駐車場</a>。
+    この予測は非公式で、到着時の空きを保証するものではありません。
+  </footer>
+</main>
+
+<script src="config.js"></script>
+<script>
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.OBP_CONFIG;
+const MAIN_LOT = "C駐車場（無料）";
+const STATUS_JA = { full: "満車", crowded: "混雑中", available: "空車", suspended: "休止" };
+const DAYTYPE_JA = { weekday: "平日", holiday: "土日祝", busy: "空港の混雑予想日" };
+const MIN_DAYS = 3; // これより少ない枠は「参考値」
+
+const state = { offset: 0, date: null, lot: MAIN_LOT, stats: {}, calendar: {} };
+
+async function api(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+function jstToday() {
+  const d = new Date(Date.now() + 9 * 3600e3);
+  return d.toISOString().slice(0, 10);
+}
+function addDays(iso, n) {
+  const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function dayType(iso) {
+  const c = state.calendar[iso];
+  if (c === "busy") return "busy";
+  const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+  if (c === "holiday" || dow === 0 || dow === 6) return "holiday";
+  return "weekday";
+}
+function slotLabel(s) { return `${String(Math.floor(s / 2)).padStart(2, "0")}:${s % 2 ? "30" : "00"}`; }
+function nowSlot() {
+  const d = new Date(Date.now() + 9 * 3600e3);
+  return d.getUTCHours() * 2 + (d.getUTCMinutes() >= 30 ? 1 : 0);
+}
+function fmtTime(ts) {
+  return new Date(ts).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadNow() {
+  const rows = await api("obp_latest?select=*");
+  const lots = rows.map(r => r.lot).sort((a, b) => (a === MAIN_LOT ? -1 : b === MAIN_LOT ? 1 : a.localeCompare(b, "ja")));
+  const sel = document.getElementById("lot");
+  sel.innerHTML = lots.map(l => `<option ${l === state.lot ? "selected" : ""}>${l}</option>`).join("");
+  const byLot = Object.fromEntries(rows.map(r => [r.lot, r]));
+  document.getElementById("now").innerHTML = lots.map(l => {
+    const r = byLot[l];
+    return `<div class="lot ${l === MAIN_LOT ? "main" : ""}">
+      <div><div class="name">${l}</div><div class="cap">${r.capacity || ""}</div></div>
+      <span class="badge s-${r.status}">${STATUS_JA[r.status] || r.status}</span></div>`;
+  }).join("") || "まだ記録がありません";
+  const latest = rows.reduce((m, r) => (r.source_updated > m ? r.source_updated : m), "");
+  if (latest) document.getElementById("updated").textContent = `公式サイトの更新: ${fmtTime(latest)}`;
+}
+
+async function loadCalendar() {
+  const rows = await api(`obp_calendar?select=day,kind&day=gte.${addDays(jstToday(), -1)}`);
+  state.calendar = Object.fromEntries(rows.map(r => [r.day, r.kind]));
+}
+
+async function loadStats(lot) {
+  if (state.stats[lot]) return state.stats[lot];
+  const rows = await api(`obp_slot_stats?select=*&lot=eq.${encodeURIComponent(lot)}`);
+  // 日の種類ごとの表と、種類を問わない全体の表（データが少ないときの代わり）
+  const by = { weekday: {}, holiday: {}, busy: {}, all: {} };
+  for (const r of rows) {
+    by[r.day_type][r.slot] = r;
+    const a = by.all[r.slot] || (by.all[r.slot] = { samples: 0, days: 0, fullN: 0, crowdN: 0 });
+    a.samples += r.samples; a.days = Math.max(a.days, r.days);
+    a.fullN += r.p_full * r.samples; a.crowdN += r.p_crowded_or_full * r.samples;
+  }
+  for (const a of Object.values(by.all)) { a.p_full = a.fullN / a.samples; a.p_crowded_or_full = a.crowdN / a.samples; }
+  return (state.stats[lot] = by);
+}
+
+function render(by) {
+  const iso = state.date;
+  const type = dayType(iso);
+  const table = by[type];
+  const typedDays = Math.max(0, ...Object.values(table).map(r => r.days));
+  const useAll = typedDays < MIN_DAYS;
+  const src = useAll ? by.all : table;
+  document.getElementById("daytype").innerHTML =
+    `${iso.replace(/-/g, "/")} は <strong>${DAYTYPE_JA[type]}</strong>` +
+    (useAll ? `（${DAYTYPE_JA[type]}の記録がまだ少ないため、全部の日の平均で表示）` : "");
+
+  const here = iso === jstToday() ? nowSlot() : -1;
+  const out = [];
+  let firstFull = null, lastFull = null;
+  for (let s = 0; s < 48; s++) {
+    const r = src[s];
+    if (!r) { out.push(`<div class="row nodata ${s === here ? "now" : ""}"><span class="t">${slotLabel(s)}</span><div class="bar"></div><span class="v">-</span></div>`); continue; }
+    const pf = +r.p_full, pc = +r.p_crowded_or_full;
+    if (pf >= 0.5) { if (firstFull === null) firstFull = s; lastFull = s; }
+    out.push(`<div class="row ${s === here ? "now" : ""}" title="${r.days}日分・${r.samples}件">
+      <span class="t">${slotLabel(s)}</span>
+      <div class="bar"><span class="c" style="width:${pc * 100}%"></span><span class="f" style="width:${pf * 100}%"></span></div>
+      <span class="v">${Math.round(pf * 100)}%</span></div>`);
+  }
+  document.getElementById("rows").innerHTML = out.join("");
+
+  const sum = document.getElementById("summary");
+  if (!Object.keys(src).length) sum.textContent = "まだ記録がありません。数日たつと予測が出ます。";
+  else if (firstFull === null) sum.textContent = "満車になりやすい時間帯は、いまのところ見つかっていません。";
+  else sum.innerHTML = `<strong>${slotLabel(firstFull)}〜${slotLabel(lastFull + 1)}</strong> ごろは満車になりやすいです（確率50%以上）。`;
+
+  const days = Math.max(0, ...Object.values(src).map(r => r.days));
+  document.getElementById("note").textContent =
+    `${days}日分の記録から計算。記録が増えるほど正確になります。` + (days < 14 ? "（2週間たつまでは参考値）" : "");
+}
+
+async function refresh() {
+  try { render(await loadStats(state.lot)); }
+  catch (e) { document.getElementById("summary").innerHTML = `<span class="err">読み込めませんでした: ${e.message}</span>`; }
+}
+
+function setDate(iso, offset) {
+  state.date = iso; state.offset = offset;
+  document.getElementById("date").value = iso;
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.day === offset)));
+}
+
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  const n = +b.dataset.day; setDate(addDays(jstToday(), n), n); refresh();
+}));
+document.getElementById("date").addEventListener("change", e => {
+  const iso = e.target.value; if (!iso) return;
+  const n = [0, 1].find(k => addDays(jstToday(), k) === iso);
+  setDate(iso, n ?? -1); refresh();
+});
+document.getElementById("lot").addEventListener("change", e => { state.lot = e.target.value; refresh(); });
+
+(async () => {
+  setDate(jstToday(), 0);
+  try { await Promise.all([loadNow(), loadCalendar()]); }
+  catch (e) { document.getElementById("now").innerHTML = `<span class="err">読み込めませんでした: ${e.message}</span>`; }
+  refresh();
+  setInterval(() => loadNow().catch(() => {}), 5 * 60e3);
+})();
+</script>
+</body>
+</html>
