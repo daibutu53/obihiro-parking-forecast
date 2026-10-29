@@ -1,4 +1,5 @@
 collect.py
 schema.sql
+cron.sql
 .github
 .keepalive

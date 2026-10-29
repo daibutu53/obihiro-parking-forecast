@@ -1,4 +1,4 @@
-"""とかち帯広空港の満空情報を取得して Supabase に記録する（GitHub Actions から5分ごとに実行）。
+"""とかち帯広空港の満空情報を取得して Supabase に記録する（手動の予備。ふだんは Supabase の pg_cron が5分ごとに記録する）。
 
 環境変数: SUPABASE_URL / SUPABASE_ANON_KEY / INGEST_TOKEN
 標準ライブラリだけで動く。
