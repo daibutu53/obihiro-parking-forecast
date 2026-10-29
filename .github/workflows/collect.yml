@@ -2,8 +2,7 @@ name: collect
 
 on:
   schedule:
-    # 非公開リポジトリの無料枠（月2000分）に収まるよう30分ごと。GitHub の都合で数分〜十数分遅れることがある
-    - cron: "7,37 * * * *"
+    - cron: "*/5 * * * *"   # GitHub の都合で数分〜十数分遅れることがある
   workflow_dispatch:
 
 jobs:

@@ -1,7 +1,7 @@
 -- とかち帯広空港 駐車場の混雑予測（hosomichi と同じDBに相乗り・obp_ 接頭辞）
 -- Supabase の SQL Editor で丸ごと1回実行する。再実行しても壊れない。
 
--- 30分ごとの記録（1回の取得で駐車場の数だけ行が入る）
+-- 5分ごとの記録（1回の取得で駐車場の数だけ行が入る）
 create table if not exists obp_parking_log (
   id bigserial primary key,
   fetched_at timestamptz not null default now(),
